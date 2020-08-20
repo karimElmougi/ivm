@@ -5,3 +5,8 @@ authors = ["karim elmougi <karim.elmougi@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+anyhow = "1.0.32"
+num_enum = "0.5.1"
+num-traits = "0.2.12"
+byteorder = "1.3.4"
+static_assertions = "1.1.0"
