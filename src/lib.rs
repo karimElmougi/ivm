@@ -1,24 +1,27 @@
+pub mod asm;
+pub mod op_code;
+
+use op_code::OpCode;
+
 use std::convert::TryFrom;
-use std::fmt::{self, Display};
 use std::io::{self, Read};
 
 #[macro_use]
 extern crate static_assertions;
 use anyhow::{anyhow, Result};
 use byteorder::{BigEndian, ReadBytesExt};
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use num_traits::PrimInt;
 
 const_assert_eq!(std::mem::size_of::<usize>(), std::mem::size_of::<u64>());
 
-struct VirtualMachine {
+pub struct VirtualMachine {
     program_counter: Cursor<u8>,
     stack: Vec<u64>,
     heap: Vec<u8>,
 }
 
 impl VirtualMachine {
-    fn new(program: Vec<u8>) -> Self {
+    pub fn new(program: Vec<u8>) -> Self {
         Self {
             program_counter: Cursor::new(program),
             stack: Default::default(),
@@ -26,7 +29,7 @@ impl VirtualMachine {
         }
     }
 
-    fn step(&mut self) -> Result<()> {
+    pub fn step(&mut self) -> Result<()> {
         let op_code = self
             .program_counter
             .read_u8()
@@ -35,6 +38,7 @@ impl VirtualMachine {
             OpCode::try_from(op_code).map_err(|_| anyhow!("Invalid OP code: {}", op_code))?;
 
         match op_code {
+            OpCode::Nop => {}
             OpCode::Add => {
                 let (op1, op2) = self.pop_stack_2()?;
                 self.stack.push(op1 + op2);
@@ -50,6 +54,14 @@ impl VirtualMachine {
             OpCode::Div => {
                 let (op1, op2) = self.pop_stack_2()?;
                 self.stack.push(op1 / op2);
+            }
+            OpCode::Mod => {
+                let (op1, op2) = self.pop_stack_2()?;
+                self.stack.push(op1 % op2);
+            }
+            OpCode::Neg => {
+                let value = self.pop_stack()?;
+                self.stack.push(-(value as i64) as u64);
             }
             OpCode::Equal => {
                 let (op1, op2) = self.pop_stack_2()?;
@@ -82,12 +94,25 @@ impl VirtualMachine {
                     .map_err(|_| anyhow!("Reached end of program mid instruction"))?;
                 self.stack.push(value);
             }
-            // OpCode::Load => {
-            // }
-            // OpCode::Store => {
-            // }
-            // OpCode::Return => {
-            // }
+            OpCode::Jump => {
+                let address = self
+                    .program_counter
+                    .read_u64::<BigEndian>()
+                    .map_err(|_| anyhow!("Reached end of program mid instruction"))?
+                    as usize;
+                self.program_counter.go_to(address)?;
+            }
+            OpCode::ConditionalJump => {
+                let address = self
+                    .program_counter
+                    .read_u64::<BigEndian>()
+                    .map_err(|_| anyhow!("Reached end of program mid instruction"))?
+                    as usize;
+                let condition = self.pop_stack()?;
+                if condition != 0 {
+                    self.program_counter.go_to(address as usize)?;
+                }
+            }
             _ => unimplemented!("{}", op_code),
         }
 
@@ -101,13 +126,8 @@ impl VirtualMachine {
     fn pop_stack_2(&mut self) -> Result<(u64, u64)> {
         self.stack
             .pop()
-            .and_then(|op2| self.stack.pop().and_then(|op1| Some((op1, op2))))
+            .and_then(|op2| self.stack.pop().map(|op1| (op1, op2)))
             .ok_or_else(|| anyhow!("Stack Underflow"))
-    }
-
-    fn alloc(&mut self) -> usize {
-        let size = self.stack.pop().expect("Stack Underflow");
-        self.heap.len()
     }
 }
 
@@ -115,6 +135,7 @@ struct Cursor<I>
 where
     I: PrimInt,
 {
+    #[allow(dead_code)]
     program: Immutable<Vec<I>>,
     begin: *const I,
     end: *const I,
@@ -148,7 +169,7 @@ where
 
     fn go_to(&mut self, pos: usize) -> Result<()> {
         let new_cursor = unsafe { self.begin.add(pos) };
-        if new_cursor < self.end {
+        if new_cursor <= self.end {
             self.cursor = new_cursor;
             Ok(())
         } else {
@@ -178,33 +199,9 @@ impl<T> Immutable<T> {
         Self(t)
     }
 
+    #[allow(dead_code)]
     fn as_ref(&self) -> &T {
         &self.0
-    }
-}
-
-#[derive(TryFromPrimitive, IntoPrimitive, Copy, Clone, Debug, PartialEq)]
-#[repr(u8)]
-enum OpCode {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Equal,
-    NotEqual,
-    GreaterThanOrEqual,
-    LessThanOrEqual,
-    GreaterThan,
-    LessThan,
-    Push,
-    Load,
-    Store,
-    Return,
-}
-
-impl Display for OpCode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
     }
 }
 
@@ -234,9 +231,28 @@ mod tests {
 
         program.push(OpCode::Div.into());
 
+        program.push(OpCode::Neg.into());
+
         let mut vm = VirtualMachine::new(program);
         while let Ok(_) = vm.step() {}
 
-        assert_eq!(*vm.stack.last().unwrap(), 6);
+        assert_eq!(*vm.stack.last().unwrap() as i64, -6);
+    }
+
+    #[test]
+    fn jump() {
+        let mut program = vec![];
+
+        program.push(OpCode::Jump.into());
+        12u64.to_be_bytes().iter().for_each(|b| program.push(*b));
+
+        program.push(OpCode::Nop.into());
+        program.push(OpCode::Nop.into());
+        program.push(OpCode::Nop.into());
+
+        let mut vm = VirtualMachine::new(program);
+        vm.step().unwrap();
+
+        assert_eq!(vm.program_counter.cursor, vm.program_counter.end);
     }
 }
