@@ -5,12 +5,58 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use parse_int::parse as parse_int;
 
+trait ToOption {
+    fn to_option<T>(self, t: T) -> Option<T>;
+}
+
+impl ToOption for bool {
+    fn to_option<T>(self, t: T) -> Option<T> {
+        if self {
+            Some(t)
+        } else {
+            None
+        }
+    }
+}
+
+enum Constant {
+    String(String),
+}
+
 pub fn parse(input: String) -> Result<Vec<u8>> {
     let mut program = vec![];
     let mut label_values = HashMap::new();
     let mut labels_to_update = vec![];
+    let mut constants = HashMap::new();
 
-    let mut it = input.split_ascii_whitespace();
+    let mut it = input.split_ascii_whitespace().peekable();
+    it.next()
+        .and_then(|token| (token == ".rodata:").to_option(()))
+        .ok_or_else(|| anyhow!("Missing .rodata section"))?;
+
+    while let Some(token) = it.next() {
+        if token == ".code:" {
+            break;
+        }
+
+        let constant_name = token
+            .strip_suffix(':')
+            .ok_or_else(|| anyhow!("missing `:` in constant declaration"))?;
+        let constant_type = it.next().ok_or_else(|| anyhow!("Missing constant type"))?;
+        let constant_value = it.next().ok_or_else(|| anyhow!("Missing contant value"))?;
+
+        let constant = match constant_type {
+            "string" => Constant::String(constant_value.to_string()),
+            _ => return Err(anyhow!("Invalid constant type `{}`", constant_type)),
+        };
+
+        if constants.insert(constant_name, constant).is_some() {
+            return Err(anyhow!("constant `{}` already declared", constant_name));
+        }
+
+        it.peek().ok_or_else(|| anyhow!("Missing .code section"))?;
+    }
+
     while let Some(token) = it.next() {
         let token = token.to_lowercase();
         match token.as_ref() {
@@ -21,6 +67,8 @@ pub fn parse(input: String) -> Result<Vec<u8>> {
             "div" => program.push(OpCode::Div.into()),
             "mod" => program.push(OpCode::Mod.into()),
             "neg" => program.push(OpCode::Neg.into()),
+            "inc" => program.push(OpCode::Inc.into()),
+            "dec" => program.push(OpCode::Dec.into()),
             "eq" => program.push(OpCode::Equal.into()),
             "neq" => program.push(OpCode::NotEqual.into()),
             "gte" => program.push(OpCode::GreaterThanOrEqual.into()),
@@ -33,6 +81,23 @@ pub fn parse(input: String) -> Result<Vec<u8>> {
                 let value = parse_int::<u64>(value)?;
                 value.to_be_bytes().iter().for_each(|b| program.push(*b));
             }
+            "pushsp" => program.push(OpCode::PushStackPointer.into()),
+            "load" => program.push(OpCode::Load.into()),
+            "store" => program.push(OpCode::Store.into()),
+            "loadb" => program.push(OpCode::LoadByte.into()),
+            "storeb" => program.push(OpCode::StoreByte.into()),
+            "salloc" => program.push(OpCode::StackAlloc.into()),
+            "call" => {
+                program.push(OpCode::Call.into());
+
+                let label = it.next().ok_or_else(|| anyhow!("Missing label to jump"))?;
+                labels_to_update.push((label.to_string(), program.len()));
+
+                0u64.to_be_bytes().iter().for_each(|b| program.push(*b));
+            }
+            "ret" => program.push(OpCode::Return.into()),
+            "exit" => program.push(OpCode::Exit.into()),
+            "print" => program.push(OpCode::Print.into()),
             "jump" => {
                 program.push(OpCode::Jump.into());
 
@@ -73,29 +138,36 @@ pub fn parse(input: String) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::VirtualMachine;
+    use crate::{VirtualMachine, VirtualMachineState};
 
     #[test]
     fn test() {
         let program = "
-        push 1
-        push 2
-        add
-        push 4
+    .rodata:
+    .code:
+        push 5
+        call square
+        exit
+        
+    square:
+        salloc
+        store
+        pushsp
+        load
+        pushsp
+        load
         mul
-        push 0x2
-        div
-        neg
-        jump label
-        push 999
-  label:
-        push 1
-        add"
+        ret"
         .to_string();
 
-        let mut vm = VirtualMachine::new(parse(program).unwrap());
-        while let Ok(_) = vm.step() {}
+        let mut vm = VirtualMachine::new(parse(program).unwrap(), vec![]);
+        while let Ok(state) = vm.step() {
+            if let VirtualMachineState::Exit(result) = state {
+                assert_eq!(result, 25);
+                return;
+            }
+        }
 
-        assert_eq!(*vm.stack.last().unwrap() as i64, -5);
+        assert!(false);
     }
 }

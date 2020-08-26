@@ -5,10 +5,11 @@ use clap::{App, Arg};
 
 use std::fs;
 
+const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
 fn main() -> Result<()> {
     let matches = App::new("iasm")
-        .version("0.1.0")
-        .author("Karim Elmougi <karim.elmougi@gmail.com>")
+        .version(VERSION)
         .about("Parses a given ivm assembler file into bitcode")
         .arg(
             Arg::with_name("file")

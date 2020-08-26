@@ -12,6 +12,8 @@ pub enum OpCode {
     Div,
     Mod,
     Neg,
+    Inc,
+    Dec,
     Equal,
     NotEqual,
     GreaterThanOrEqual,
@@ -19,11 +21,18 @@ pub enum OpCode {
     GreaterThan,
     LessThan,
     Push,
+    PushStackPointer,
     Load,
     Store,
+    LoadByte,
+    StoreByte,
+    StackAlloc,
     Jump,
     ConditionalJump,
+    Print,
+    Call,
     Return,
+    Exit,
 }
 
 impl Display for OpCode {
