@@ -1,5 +1,5 @@
+use crate::mem::ROM_ADDRESS_MASK;
 use crate::OpCode;
-use crate::ROM_ADDRESS_MASK;
 
 use std::collections::HashMap;
 

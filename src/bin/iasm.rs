@@ -33,7 +33,12 @@ fn main() -> Result<()> {
         asm::parse(program).map_err(|e| anyhow!("Invalid asm: {}", e))?;
 
     let mut file_content = vec![];
-    rodata.len().to_be_bytes().iter().for_each(|b| file_content.push(*b));
+    rodata
+        .len()
+        .to_be_bytes()
+        .iter()
+        .for_each(|b| file_content.push(*b));
+
     file_content.append(&mut rodata);
     file_content.append(&mut bitcode);
 

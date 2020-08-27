@@ -1,10 +1,12 @@
 pub mod asm;
+pub mod mem;
 pub mod op_code;
 
+use mem::{size_in_bits, Address, Allocation, Cursor, StackFrame, ValueStack};
 use op_code::OpCode;
 
+use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
-use std::io::{self, Read};
 
 #[macro_use]
 extern crate pest_derive;
@@ -12,7 +14,6 @@ extern crate pest_derive;
 extern crate static_assertions;
 use anyhow::{anyhow, Result};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use num_traits::PrimInt;
 
 const_assert_eq!(std::mem::size_of::<usize>(), std::mem::size_of::<u64>());
 
@@ -27,6 +28,7 @@ pub struct VirtualMachine {
     stack: Vec<StackFrame>,
     heap: Vec<u8>,
     rodata: Vec<u8>,
+    allocations: BTreeMap<usize, Allocation>,
 }
 
 impl VirtualMachine {
@@ -37,6 +39,7 @@ impl VirtualMachine {
             stack: vec![StackFrame::new(0)],
             heap: Default::default(),
             rodata,
+            allocations: Default::default(),
         }
     }
 
@@ -299,168 +302,6 @@ impl VirtualMachine {
     }
 }
 
-#[derive(Default)]
-struct ValueStack(Vec<u64>);
-
-impl ValueStack {
-    fn push(&mut self, value: u64) {
-        self.0.push(value);
-    }
-
-    fn pop(&mut self) -> Result<u64> {
-        self.0.pop().ok_or_else(|| anyhow!("Value stack is empty"))
-    }
-
-    fn pop_2(&mut self) -> Result<(u64, u64)> {
-        self.0
-            .pop()
-            .and_then(|op2| self.0.pop().map(|op1| (op1, op2)))
-            .ok_or_else(|| anyhow!("Value stack is empty"))
-    }
-}
-
-struct StackFrame {
-    return_address: usize,
-    locals: Vec<u64>,
-}
-
-impl StackFrame {
-    fn new(return_address: usize) -> Self {
-        Self {
-            return_address,
-            locals: Default::default(),
-        }
-    }
-}
-
-enum Address {
-    Stack(usize, u8),
-    Heap(usize),
-    ROM(usize),
-}
-
-const SHIFT_SIZE: usize = size_in_bits::<u64>() - 2;
-pub const ROM_ADDRESS_MASK: usize = 0b10 << SHIFT_SIZE;
-
-impl TryFrom<u64> for Address {
-    type Error = String;
-
-    fn try_from(value: u64) -> std::result::Result<Address, Self::Error> {
-        let mask = 0b11u64 << SHIFT_SIZE;
-        let index = (value & !mask) as usize;
-
-        let address = match (value & mask) >> SHIFT_SIZE {
-            0b00 => {
-                let offset_mask = u8::MAX as usize;
-                let stack_frame_index = (index & !offset_mask) >> size_in_bits::<u8>();
-                let local_variable_index = (index & offset_mask) as u8;
-                Address::Stack(stack_frame_index, local_variable_index)
-            }
-            0b01 => Address::Heap(index),
-            0b10 => Address::ROM(index),
-            _ => return Err(format!("Invalid address: {:#x}", value)),
-        };
-
-        Ok(address)
-    }
-}
-
-impl Into<u64> for Address {
-    fn into(self) -> u64 {
-        const HEAP_ADDRESS_MASK: usize = 0b01 << SHIFT_SIZE;
-
-        (match self {
-            Address::Stack(index, offset) => {
-                index << size_in_bits::<u8>() | offset as usize
-            }
-            Address::Heap(index) => HEAP_ADDRESS_MASK | index,
-            Address::ROM(index) => ROM_ADDRESS_MASK | index,
-        }) as u64
-    }
-}
-
-struct Cursor<I>
-where
-    I: PrimInt,
-{
-    #[allow(dead_code)]
-    program: Immutable<Vec<I>>,
-    begin: *const I,
-    end: *const I,
-    cursor: *const I,
-}
-
-impl<I> Cursor<I>
-where
-    I: PrimInt,
-{
-    fn new(program: Vec<I>) -> Self {
-        let begin = program.as_ptr();
-        let end = unsafe { begin.add(program.len()) };
-        Self {
-            program: Immutable::new(program),
-            begin,
-            end,
-            cursor: begin,
-        }
-    }
-
-    fn next(&mut self) -> Option<I> {
-        if self.cursor != self.end {
-            let value = unsafe { *self.cursor };
-            self.cursor = unsafe { self.cursor.add(1) };
-            Some(value)
-        } else {
-            None
-        }
-    }
-
-    fn go_to(&mut self, pos: usize) -> Result<()> {
-        let new_cursor = unsafe { self.begin.add(pos) };
-        if new_cursor <= self.end {
-            self.cursor = new_cursor;
-            Ok(())
-        } else {
-            Err(anyhow!("Position out of bounds"))
-        }
-    }
-
-    fn current_pos(&self) -> usize {
-        self.cursor as usize - self.begin as usize
-    }
-}
-
-impl Read for Cursor<u8> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let mut num_read = 0;
-        for (i, byte) in buf.iter_mut().enumerate() {
-            match self.next() {
-                Some(val) => *byte = val,
-                None => return Ok(i),
-            }
-            num_read = i + 1;
-        }
-        Ok(num_read)
-    }
-}
-
-struct Immutable<T>(T);
-
-impl<T> Immutable<T> {
-    fn new(t: T) -> Self {
-        Self(t)
-    }
-
-    #[allow(dead_code)]
-    fn as_ref(&self) -> &T {
-        &self.0
-    }
-}
-
-const fn size_in_bits<T>() -> usize {
-    std::mem::size_of::<T>() * 8
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,9 +347,10 @@ mod tests {
         program.push(OpCode::Nop.into());
         program.push(OpCode::Nop.into());
 
+        let end = program.len();
         let mut vm = VirtualMachine::new(program, vec![]);
         vm.step().unwrap();
 
-        assert_eq!(vm.program_counter.cursor, vm.program_counter.end);
+        assert_eq!(vm.program_counter.current_pos(), end);
     }
 }
