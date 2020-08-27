@@ -7,6 +7,8 @@ use std::convert::{TryFrom, TryInto};
 use std::io::{self, Read};
 
 #[macro_use]
+extern crate pest_derive;
+#[macro_use]
 extern crate static_assertions;
 use anyhow::{anyhow, Result};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -43,6 +45,7 @@ impl VirtualMachine {
             .program_counter
             .read_u8()
             .map_err(|_| anyhow!("Reached end of program"))?;
+
         let op_code =
             OpCode::try_from(op_code).map_err(|_| anyhow!("Invalid OP code: {}", op_code))?;
 
@@ -138,7 +141,7 @@ impl VirtualMachine {
                 }
             }
             OpCode::Call => {
-                if self.stack.len() == usize::MAX << (std::mem::size_of::<u8>() * 8) {
+                if self.stack.len() == usize::MAX << size_in_bits::<u8>() {
                     return Err(anyhow!("Stack overflow"));
                 }
 
@@ -259,10 +262,7 @@ impl VirtualMachine {
                 self.value_stack.push(address);
             }
             OpCode::Print => {
-                let raw_address = self
-                    .program_counter
-                    .read_u64::<BigEndian>()
-                    .map_err(|_| anyhow!("Reached end of program mid instruction"))?;
+                let raw_address = self.value_stack.pop()?;
 
                 let address = raw_address.try_into().map_err(|e: String| anyhow!(e))?;
                 let string_begin_ptr = match address {
@@ -339,19 +339,20 @@ enum Address {
     ROM(usize),
 }
 
+const SHIFT_SIZE: usize = size_in_bits::<u64>() - 2;
+pub const ROM_ADDRESS_MASK: usize = 0b10 << SHIFT_SIZE;
+
 impl TryFrom<u64> for Address {
     type Error = String;
 
     fn try_from(value: u64) -> std::result::Result<Address, Self::Error> {
-        const SHIFT_SIZE: usize = (std::mem::size_of::<u64>() * 8) - 2;
-
         let mask = 0b11u64 << SHIFT_SIZE;
         let index = (value & !mask) as usize;
 
         let address = match (value & mask) >> SHIFT_SIZE {
             0b00 => {
                 let offset_mask = u8::MAX as usize;
-                let stack_frame_index = (index & !offset_mask) >> (std::mem::size_of::<u8>() * 8);
+                let stack_frame_index = (index & !offset_mask) >> size_in_bits::<u8>();
                 let local_variable_index = (index & offset_mask) as u8;
                 Address::Stack(stack_frame_index, local_variable_index)
             }
@@ -366,13 +367,11 @@ impl TryFrom<u64> for Address {
 
 impl Into<u64> for Address {
     fn into(self) -> u64 {
-        const SHIFT_SIZE: usize = (std::mem::size_of::<u64>() * 8) - 2;
         const HEAP_ADDRESS_MASK: usize = 0b01 << SHIFT_SIZE;
-        const ROM_ADDRESS_MASK: usize = 0b10 << SHIFT_SIZE;
 
         (match self {
             Address::Stack(index, offset) => {
-                index << (std::mem::size_of::<u8>() * 8) | offset as usize
+                index << size_in_bits::<u8>() | offset as usize
             }
             Address::Heap(index) => HEAP_ADDRESS_MASK | index,
             Address::ROM(index) => ROM_ADDRESS_MASK | index,
@@ -456,6 +455,10 @@ impl<T> Immutable<T> {
     fn as_ref(&self) -> &T {
         &self.0
     }
+}
+
+const fn size_in_bits<T>() -> usize {
+    std::mem::size_of::<T>() * 8
 }
 
 #[cfg(test)]

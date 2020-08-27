@@ -5,7 +5,7 @@ use clap::{App, Arg};
 
 use std::fs;
 
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> Result<()> {
     let matches = App::new("iasm")
@@ -28,7 +28,14 @@ fn main() -> Result<()> {
 
     let program = fs::read_to_string(file_path)
         .map_err(|e| anyhow!("Unable to read file {}: {}", file_path, e))?;
-    let bitcode = asm::parse(program).map_err(|e| anyhow!("Invalid asm: {}", e))?;
 
-    fs::write("out.bc", bitcode).map_err(|e| anyhow!("Unable to create bitcode file: {}", e))
+    let (mut bitcode, mut rodata) =
+        asm::parse(program).map_err(|e| anyhow!("Invalid asm: {}", e))?;
+
+    let mut file_content = vec![];
+    rodata.len().to_be_bytes().iter().for_each(|b| file_content.push(*b));
+    file_content.append(&mut rodata);
+    file_content.append(&mut bitcode);
+
+    fs::write("out.bc", file_content).map_err(|e| anyhow!("Unable to create bitcode file: {}", e))
 }

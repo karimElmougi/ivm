@@ -1,0 +1,79 @@
+program = _{ SOI ~ rodata_section ~ code_section ~ EOI}
+
+rodata_section = {".rodata" ~ ":" ~ constant*}
+
+constant = {ident ~ ":" ~ ident ~ "=" ~ string}
+
+code_section = {".code" ~ ":" ~ instruction* }
+
+instruction = {
+    nop 
+    | add
+    | sub
+    | mul
+    | div
+    | modulus 
+    | neg
+    | inc
+    | dec
+    | eq
+    | neq
+    | gte
+    | lte
+    | gt
+    | lt
+    | pushsp
+    | load
+    | store
+    | loadb
+    | storeb
+    | alloca
+    | ret
+    | exit
+    | print
+    | push
+    | call
+    | jump
+    | condjump
+    | label
+}
+
+nop = {^"nop"} 
+add = {^"add"}
+sub = {^"sub"}
+mul = {^"mul"}
+div = {^"div"}
+modulus = {^"mod"}
+neg = {^"neg"}
+inc = {^"inc"}
+dec = {^"dec"}
+eq  = {^"eq"}
+neq = {^"neq"}
+gte = {^"gte"}
+lte = {^"lte"}
+gt  = {^"gt"}
+lt  = {^"lt"}
+pushsp  = {^"pushsp"}
+load  = {^"load"}
+store  = {^"store"}
+loadb  = {^"loadb"}
+storeb  = {^"storeb"}
+alloca = {^"alloca"}
+ret = {^"ret"}
+exit = {^"exit"}
+print = {^"print"}
+push = {^"push" ~ (ident | number)}
+call = {^"call" ~ ident}
+jump = {^"jump" ~ ident}
+condjump = {^"condjump" ~ ident}
+label = {ident ~ ":"}
+
+number = @{"-"? ~ ("0x" | "0b" | "0o")? ~ ASCII_HEX_DIGIT+}
+
+ident = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+
+string = @{ "\"" ~ ( "\"\"" | (!"\"" ~ ANY) )* ~ "\"" }
+
+WHITESPACE = _{ " " | "\t" | NEWLINE }
+
+COMMENT = _{ "//" ~ (!NEWLINE ~ ANY)* }
