@@ -28,6 +28,8 @@ instruction = {
     | loadb
     | storeb
     | alloca
+    | malloc
+    | free
     | ret
     | exit
     | print
@@ -59,6 +61,8 @@ store  = {^"store"}
 loadb  = {^"loadb"}
 storeb  = {^"storeb"}
 alloca = {^"alloca"}
+malloc = {^"malloc"}
+free = {^"free"}
 ret = {^"ret"}
 exit = {^"exit"}
 print = {^"print"}

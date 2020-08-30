@@ -94,6 +94,8 @@ fn parse_instructions(
                 Rule::loadb => program.push(OpCode::LoadByte.into()),
                 Rule::storeb => program.push(OpCode::StoreByte.into()),
                 Rule::alloca => program.push(OpCode::StackAlloc.into()),
+                Rule::malloc => program.push(OpCode::ManualAlloc.into()),
+                Rule::free => program.push(OpCode::Free.into()),
                 Rule::ret => program.push(OpCode::Return.into()),
                 Rule::exit => program.push(OpCode::Exit.into()),
                 Rule::print => program.push(OpCode::Print.into()),

@@ -2,7 +2,7 @@ pub mod asm;
 pub mod mem;
 pub mod op_code;
 
-use mem::{size_in_bits, Address, Allocation, Cursor, StackFrame, ValueStack};
+use mem::{size_in_bits, Address, Allocation, Cursor, FindUnusedChunk, StackFrame, ValueStack};
 use op_code::OpCode;
 
 use std::collections::BTreeMap;
@@ -263,6 +263,32 @@ impl VirtualMachine {
 
                 let address = Address::Stack(self.stack.len() - 1, offset).into();
                 self.value_stack.push(address);
+            }
+            OpCode::ManualAlloc => {
+                let size = self.value_stack.pop()? as usize;
+
+                let mut address = self
+                    .allocations
+                    .find_unused_chunk(size, self.heap.len() - 1);
+
+                if address.is_none() {
+                    address = Some(self.heap.len());
+                    self.heap.resize(self.heap.len() + size, 0);
+                }
+
+                self.allocations.insert(
+                    address.unwrap(),
+                    Allocation {
+                        size,
+                        is_managed: false,
+                    },
+                );
+
+                self.value_stack.push(address.unwrap() as u64);
+            }
+            OpCode::Free => {
+                let address = self.value_stack.pop()? as usize;
+                self.allocations.remove(&address);
             }
             OpCode::Print => {
                 let raw_address = self.value_stack.pop()?;

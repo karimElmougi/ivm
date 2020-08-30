@@ -27,6 +27,8 @@ pub enum OpCode {
     LoadByte,
     StoreByte,
     StackAlloc,
+    ManualAlloc,
+    Free,
     Jump,
     ConditionalJump,
     Print,

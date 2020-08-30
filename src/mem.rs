@@ -1,8 +1,13 @@
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::io::{self, Read};
 
 use anyhow::{anyhow, Result};
 use num_traits::PrimInt;
+
+const SHIFT_SIZE: usize = size_in_bits::<u64>() - 2;
+pub const ROM_ADDRESS_MASK: usize = 0b10 << SHIFT_SIZE;
+const HEAP_ADDRESS_MASK: usize = 0b01 << SHIFT_SIZE;
 
 #[derive(Default)]
 pub struct Allocation {
@@ -49,10 +54,6 @@ pub enum Address {
     Heap(usize),
     ROM(usize),
 }
-
-const SHIFT_SIZE: usize = size_in_bits::<u64>() - 2;
-pub const ROM_ADDRESS_MASK: usize = 0b10 << SHIFT_SIZE;
-const HEAP_ADDRESS_MASK: usize = 0b01 << SHIFT_SIZE;
 
 impl TryFrom<u64> for Address {
     type Error = String;
@@ -167,4 +168,29 @@ impl<T> Immutable<T> {
 
 pub const fn size_in_bits<T>() -> usize {
     std::mem::size_of::<T>() * 8
+}
+
+pub trait FindUnusedChunk {
+    fn find_unused_chunk(&self, size: usize, heap_end: usize) -> Option<usize>;
+}
+
+impl FindUnusedChunk for BTreeMap<usize, Allocation> {
+    fn find_unused_chunk(&self, size: usize, heap_end: usize) -> Option<usize> {
+        let mut iter = self.iter().peekable();
+        while let Some((index, allocation)) = iter.next() {
+            let next_index = iter
+                .peek()
+                .and_then(|p| Some(*p.0))
+                .or(Some(heap_end))
+                .unwrap();
+
+            let free_gap = next_index - (index + allocation.size);
+
+            if size as usize <= free_gap {
+                return Some(index + allocation.size);
+            }
+        }
+
+        None
+    }
 }
